@@ -130,13 +130,14 @@ void split_string_by_specifiers(
   }
 }
 
-int read_amber_parm_stage1(const char *filename, AmberTopparMap &toppar_map) {
+bool read_amber_parm_stage1(const char *filename, AmberTopparMap &toppar_map) {
   using std::ifstream;
   using std::istringstream;
   using std::string;
-  int failed_bit = 0;
+  bool success = true;
   string error_msg;
   ifstream ifs_parm(filename);
+  if (!ifs_parm.is_open()) return false;
   string line;
   string current_flag;
   bool match_flag = false;
@@ -144,50 +145,53 @@ int read_amber_parm_stage1(const char *filename, AmberTopparMap &toppar_map) {
   //   vector<FortranData> section_data;
   vector<FortranFormatSpecifier> specifiers;
   tuple<bool, vector<FortranData>> *p_map = nullptr;
+  istringstream iss;
   while (std::getline(ifs_parm, line)) {
     /* AMBER format parser requirement 3:
      * Parsers should not expect or require %COMMENT lines to exist,
      * but should properly parse the file if any number of %COMMENT
      * lines appear as indicated above.
      */
-    if (line.find("%COMMENT") == 0) {
-      continue;
-    } else if (line.find("%VERSION") == 0) {
-      // parse the version line, read version_stamp and build time
-      char tmp_version_stamp[16];
-      char tmp_date[16];
-      char tmp_time[16];
-      sscanf(line.c_str(), "%%VERSION VERSION_STAMP = %9s DATE = %8s %8s",
-             tmp_version_stamp, tmp_date, tmp_time);
-      continue;
-    } else if (line.find("%FLAG") == 0) {
-      // parse flags
-      if (match_flag && match_format) {
-        // insert the previous section into map
-        current_flag.clear();
-        specifiers.clear();
-        match_flag = false;
-        match_format = false;
+    if (line[0] == '%') {
+      if (line.find("%COMMENT") == 0) {
+        continue;
+      } else if (line.find("%VERSION") == 0) {
+        // parse the version line, read version_stamp and build time
+        char tmp_version_stamp[16];
+        char tmp_date[16];
+        char tmp_time[16];
+        sscanf(line.c_str(), "%%VERSION VERSION_STAMP = %9s DATE = %8s %8s",
+               tmp_version_stamp, tmp_date, tmp_time);
+        continue;
+      } else if (line.find("%FLAG") == 0) {
+        // parse flags
+        if (match_flag && match_format) {
+          // insert the previous section into map
+          current_flag.clear();
+          specifiers.clear();
+          match_flag = false;
+          match_format = false;
+        }
+        istringstream iss(line.substr(strlen("%FLAG")));
+        iss >> current_flag;
+        p_map = &(toppar_map[current_flag]);
+        std::get<0>(*p_map) = false;
+        match_flag = true;
+        continue;
+      } else if (line.find("%FORMAT") == 0) {
+        // parse format
+        if (match_flag == false) {
+          success = false;
+          break;
+        }
+        const size_t format_start = line.find("(", strlen("%FORMAT"));
+        const size_t format_end = line.find(")", format_start + 1);
+        parse_fortran_format(
+            line.substr(format_start + 1, format_end - (format_start + 1)),
+            specifiers);
+        match_format = true;
+        continue;
       }
-      istringstream iss(line.substr(strlen("%FLAG")));
-      match_flag = true;
-      iss >> current_flag;
-      p_map = &(toppar_map[current_flag]);
-      std::get<0>(*p_map) = false;
-      continue;
-    } else if (line.find("%FORMAT") == 0) {
-      // parse format
-      if (match_flag == false) {
-        failed_bit = -1;
-        error_msg = string("Expect %FLAG before %FORMAT.");
-      }
-      const size_t format_start = line.find("(", strlen("%FORMAT"));
-      const size_t format_end = line.find(")", format_start + 1);
-      parse_fortran_format(
-          line.substr(format_start + 1, format_end - (format_start + 1)),
-          specifiers);
-      match_format = true;
-      continue;
     }
     // parse data fields
     if (match_flag && match_format) {
@@ -195,14 +199,15 @@ int read_amber_parm_stage1(const char *filename, AmberTopparMap &toppar_map) {
       split_string_by_specifiers(line, specifiers, std::get<1>(*p_map));
     }
   }
-  return failed_bit;
+  return success;
 }
 
-int read_amber_parm_stage2(AmberTopparMap &toppar_map,
-                           Ambertoppar &toppar_data) {
+bool read_amber_parm_stage2(AmberTopparMap &toppar_map,
+                            Ambertoppar &toppar_data) {
   using std::cerr;
   using std::get;
   using std::ref;
+  bool success = true;
   // TITLE
   {
     // check TITLE to see if this is a AMBER force field
@@ -210,83 +215,86 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     if (current_section == toppar_map.end()) {
       // check if this is a CHARMM force field in AMBER format
       current_section = toppar_map.find("CTITLE");
-      toppar_data.IsCharmmFF = true;
+      if (current_section == toppar_map.end()) {
+        cerr << "TITLE/CTITLE section for AMBER/CHARMM force field is not "
+                "found!\n";
+        toppar_data.IsCharmmFF = false;
+        success = false;
+        cerr << "Failed to read title!\n";
+      } else {
+        toppar_data.IsCharmmFF = true;
+      }
     } else {
-      toppar_data.IsCharmmFF = false;
-    }
-    if (current_section == toppar_map.end()) {
-      cerr << "TITLE/CTITLE section for AMBER/CHARMM force field is not "
-              "found!\n";
       toppar_data.IsCharmmFF = false;
     }
     toppar_data.ititl = get<1>(current_section->second).size() > 0 ? get<1>(current_section->second)[0].String : string();
     get<0>(current_section->second) = true;
   }
   // POINTERS
-  {
+  if (success) {
     const string section_name{"POINTERS"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_pointer(get<1>(current_section->second), toppar_data);
+      success = parse_pointer(get<1>(current_section->second), toppar_data);
       get<0>(current_section->second) = true;
     } else {
       cerr << "Missing " << section_name << " section!\n";
     }
   }
   // ATOM_NAME
-  {
+  if (success) {
     const string section_name{"ATOM_NAME"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Natom,
-                    toppar_data.AtomNames, section_name);
+      success = parse_section(get<1>(current_section->second), toppar_data.Natom,
+                              toppar_data.AtomNames, section_name);
       get<0>(current_section->second) = true;
     } else {
       cerr << "Missing " << section_name << " section!\n";
     }
   }
   // CHARGE
-  {
+  if (success) {
     const string section_name{"CHARGE"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Natom,
-                    toppar_data.Charges, section_name);
+      success = parse_section(get<1>(current_section->second), toppar_data.Natom,
+                              toppar_data.Charges, section_name);
       get<0>(current_section->second) = true;
     } else {
       cerr << "Missing " << section_name << " section!\n";
     }
   }
   // ATOMIC_NUMBER
-  {
+  if (success) {
     const string section_name{"ATOMIC_NUMBER"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Natom,
-                    toppar_data.AtomNumbers, section_name);
+      success = parse_section(get<1>(current_section->second), toppar_data.Natom,
+                              toppar_data.AtomNumbers, section_name);
       get<0>(current_section->second) = true;
     } else {
       cerr << "Missing " << section_name << " section!\n";
     }
   }
   // MASS
-  {
+  if (success) {
     const string section_name{"MASS"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Natom,
-                    toppar_data.Masses, section_name);
+      success = parse_section(get<1>(current_section->second), toppar_data.Natom,
+                              toppar_data.Masses, section_name);
       get<0>(current_section->second) = true;
     } else {
       cerr << "Missing " << section_name << " section!\n";
     }
   }
   // ATOM_TYPE_INDEX
-  {
+  if (success) {
     const string section_name{"ATOM_TYPE_INDEX"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Natom,
+      success = parse_section(get<1>(current_section->second), toppar_data.Natom,
                     toppar_data.Iac, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -294,11 +302,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // NUMBER_EXCLUDED_ATOMS
-  {
+  if (success) {
     const string section_name{"NUMBER_EXCLUDED_ATOMS"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Natom,
+      success = parse_section(get<1>(current_section->second), toppar_data.Natom,
                     toppar_data.Iblo, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -306,12 +314,12 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // NONBONDED_PARM_INDEX
-  {
+  if (success) {
     const int Ntype2d = toppar_data.Ntypes * toppar_data.Ntypes;
     const string section_name{"NONBONDED_PARM_INDEX"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), Ntype2d, toppar_data.Cno,
+      success = parse_section(get<1>(current_section->second), Ntype2d, toppar_data.Cno,
                     section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -319,11 +327,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // RESIDUE_LABEL
-  {
+  if (success) {
     const string section_name{"RESIDUE_LABEL"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nres,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nres,
                     toppar_data.ResNames, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -331,11 +339,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // RESIDUE_POINTER
-  {
+  if (success) {
     const string section_name{"RESIDUE_POINTER"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nres,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nres,
                     toppar_data.Ipres, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -343,11 +351,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // BOND_FORCE_CONSTANT
-  {
+  if (success) {
     const string section_name{"BOND_FORCE_CONSTANT"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Numbnd,
+      success = parse_section(get<1>(current_section->second), toppar_data.Numbnd,
                     toppar_data.Rk, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -355,11 +363,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // BOND_EQUIL_VALUE
-  {
+  if (success) {
     const string section_name{"BOND_EQUIL_VALUE"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Numbnd,
+      success = parse_section(get<1>(current_section->second), toppar_data.Numbnd,
                     toppar_data.Req, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -367,11 +375,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // ANGLE_FORCE_CONSTANT
-  {
+  if (success) {
     const string section_name{"ANGLE_FORCE_CONSTANT"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Numang,
+      success = parse_section(get<1>(current_section->second), toppar_data.Numang,
                     toppar_data.Tk, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -379,11 +387,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // ANGLE_EQUIL_VALUE
-  {
+  if (success) {
     const string section_name{"ANGLE_EQUIL_VALUE"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Numang,
+      success = parse_section(get<1>(current_section->second), toppar_data.Numang,
                     toppar_data.Teq, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -391,11 +399,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // DIHEDRAL_FORCE_CONSTANT
-  {
+  if (success) {
     const string section_name{"DIHEDRAL_FORCE_CONSTANT"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nptra,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nptra,
                     toppar_data.Pk, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -403,11 +411,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // DIHEDRAL_PERIODICITY
-  {
+  if (success) {
     const string section_name{"DIHEDRAL_PERIODICITY"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nptra,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nptra,
                     toppar_data.Pn, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -415,11 +423,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // DIHEDRAL_PHASE
-  {
+  if (success) {
     const string section_name{"DIHEDRAL_PHASE"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nptra,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nptra,
                     toppar_data.Phase, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -427,11 +435,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // SCEE_SCALE_FACTOR
-  {
+  if (success) {
     const string section_name{"SCEE_SCALE_FACTOR"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nptra,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nptra,
                     toppar_data.SceeScaleFactor, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -439,11 +447,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // SCNB_SCALE_FACTOR
-  {
+  if (success) {
     const string section_name{"SCNB_SCALE_FACTOR"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nptra,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nptra,
                     toppar_data.ScnbScaleFactor, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -451,11 +459,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // SOLTY (UNUSED)
-  {
+  if (success) {
     const string section_name{"SOLTY"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      //       parse_section(get<1>(current_section->second),
+      //       success = parse_section(get<1>(current_section->second),
       //                     toppar_data.Natyp, toppar_data.Solty,
       //                     section_name);
       get<0>(current_section->second) = true;
@@ -464,12 +472,12 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // LENNARD_JONES_ACOEF
-  {
+  if (success) {
     const int Nttyp = toppar_data.Ntypes * (toppar_data.Ntypes + 1) / 2;
     const string section_name{"LENNARD_JONES_ACOEF"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), Nttyp, toppar_data.Cn1,
+      success = parse_section(get<1>(current_section->second), Nttyp, toppar_data.Cn1,
                     section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -477,12 +485,12 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // LENNARD_JONES_BCOEF
-  {
+  if (success) {
     const int Nttyp = toppar_data.Ntypes * (toppar_data.Ntypes + 1) / 2;
     const string section_name{"LENNARD_JONES_BCOEF"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), Nttyp, toppar_data.Cn2,
+      success = parse_section(get<1>(current_section->second), Nttyp, toppar_data.Cn2,
                     section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -490,11 +498,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // BONDS_INC_HYDROGEN
-  {
+  if (success) {
     const string section_name{"BONDS_INC_HYDROGEN"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nbonh,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nbonh,
                     {ref(toppar_data.BondHAt1), ref(toppar_data.BondHAt2),
                      ref(toppar_data.BondHNum)},
                     section_name);
@@ -504,11 +512,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // BONDS_WITHOUT_HYDROGEN
-  {
+  if (success) {
     const string section_name{"BONDS_WITHOUT_HYDROGEN"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nbona,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nbona,
                     {ref(toppar_data.BondAt1), ref(toppar_data.BondAt2),
                      ref(toppar_data.BondNum)},
                     section_name);
@@ -518,11 +526,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // ANGLES_INC_HYDROGEN
-  {
+  if (success) {
     const string section_name{"ANGLES_INC_HYDROGEN"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Ntheth,
+      success = parse_section(get<1>(current_section->second), toppar_data.Ntheth,
                     {ref(toppar_data.AngleHAt1), ref(toppar_data.AngleHAt2),
                      ref(toppar_data.AngleHAt3), ref(toppar_data.AngleHNum)},
                     section_name);
@@ -532,11 +540,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // ANGLES_WITHOUT_HYDROGEN
-  {
+  if (success) {
     const string section_name{"ANGLES_WITHOUT_HYDROGEN"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Ntheta,
+      success = parse_section(get<1>(current_section->second), toppar_data.Ntheta,
                     {ref(toppar_data.AngleAt1), ref(toppar_data.AngleAt2),
                      ref(toppar_data.AngleAt3), ref(toppar_data.AngleNum)},
                     section_name);
@@ -546,11 +554,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // DIHEDRALS_INC_HYDROGEN
-  {
+  if (success) {
     const string section_name{"DIHEDRALS_INC_HYDROGEN"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nphih,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nphih,
                     {ref(toppar_data.DihHAt1), ref(toppar_data.DihHAt2),
                      ref(toppar_data.DihHAt3), ref(toppar_data.DihHAt4),
                      ref(toppar_data.DihHNum)},
@@ -561,11 +569,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // DIHEDRALS_WITHOUT_HYDROGEN
-  {
+  if (success) {
     const string section_name{"DIHEDRALS_WITHOUT_HYDROGEN"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nphia,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nphia,
                     {ref(toppar_data.DihAt1), ref(toppar_data.DihAt2),
                      ref(toppar_data.DihAt3), ref(toppar_data.DihAt4),
                      ref(toppar_data.DihNum)},
@@ -576,11 +584,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // EXCLUDED_ATOMS_LIST
-  {
+  if (success) {
     const string section_name{"EXCLUDED_ATOMS_LIST"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nnb,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nnb,
                     toppar_data.ExclAt, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -588,11 +596,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // HBOND_ACOEF
-  {
+  if (success) {
     const string section_name{"HBOND_ACOEF"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nphb,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nphb,
                     toppar_data.HB12, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -600,11 +608,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // HBOND_BCOEF
-  {
+  if (success) {
     const string section_name{"HBOND_BCOEF"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Nphb,
+      success = parse_section(get<1>(current_section->second), toppar_data.Nphb,
                     toppar_data.HB10, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -612,7 +620,7 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // HBCUT (UNUSED)
-  {
+  if (success) {
     const string section_name{"HBCUT"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
@@ -623,11 +631,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // AMBER_ATOM_TYPE
-  {
+  if (success) {
     const string section_name{"AMBER_ATOM_TYPE"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Natom,
+      success = parse_section(get<1>(current_section->second), toppar_data.Natom,
                     toppar_data.AtomSym, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -635,11 +643,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // TREE_CHAIN_CLASSIFICATION
-  {
+  if (success) {
     const string section_name{"TREE_CHAIN_CLASSIFICATION"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Natom,
+      success = parse_section(get<1>(current_section->second), toppar_data.Natom,
                     toppar_data.AtomTree, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -647,11 +655,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // JOIN_ARRAY (UNUSED)
-  {
+  if (success) {
     const string section_name{"JOIN_ARRAY"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      //       parse_section(get<1>(current_section->second),
+      //       success = parse_section(get<1>(current_section->second),
       //                     toppar_data.Natom, toppar_data.TreeJoin,
       //                     section_name);
       get<0>(current_section->second) = true;
@@ -660,11 +668,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // IROTAT (UNUSED)
-  {
+  if (success) {
     const string section_name{"IROTAT"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-//             parse_section(get<1>(current_section->second),
+//             success = parse_section(get<1>(current_section->second),
 //                           toppar_data.Natom, toppar_data.IrotatArray,
 //                           section_name);
       get<0>(current_section->second) = true;
@@ -675,7 +683,7 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
   // parse periodic boundary conditions only if IFBOX > 0
   if (toppar_data.Ifbox > 0) {
     // SOLVENT_POINTERS
-    {
+    if (success) {
       const string section_name{"SOLVENT_POINTERS"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
@@ -691,17 +699,18 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
         } else {
           std::cerr << "Expect " << 3 << " but " << get<1>(current_section->second).size() << " "
                     << section_name << " are defined\n";
+          success = false;
         }
       } else {
         cerr << "Missing " << section_name << " section!\n";
       }
     }
     // ATOMS_PER_MOLECULE
-    {
+    if (success) {
       const string section_name{"ATOMS_PER_MOLECULE"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second), toppar_data.Nspm,
+        success = parse_section(get<1>(current_section->second), toppar_data.Nspm,
                       toppar_data.AtomsPerMolecule, section_name);
         get<0>(current_section->second) = true;
       } else {
@@ -709,23 +718,25 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       }
     }
     // BOX_DIMENSIONS
-    {
+    if (success) {
       const string section_name{"BOX_DIMENSIONS"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second), 4,
+        success = parse_section(get<1>(current_section->second), 4,
                       toppar_data.BoxDimensions, section_name);
         get<0>(current_section->second) = true;
       } else {
         cerr << "Missing " << section_name << " section!\n";
       }
     }
+  }
+  if (toppar_data.Ifcap > 0) {
     // CAP_INFO
-    {
+    if (success) {
       const string section_name{"CAP_INFO"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second), 1, toppar_data.CapInfo,
+        success = parse_section(get<1>(current_section->second), 1, toppar_data.CapInfo,
                       section_name);
         get<0>(current_section->second) = true;
       } else {
@@ -733,11 +744,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       }
     }
     // CAP_INFO2
-    {
+    if (success) {
       const string section_name{"CAP_INFO2"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second), 4, toppar_data.CapInfo2,
+        success = parse_section(get<1>(current_section->second), 4, toppar_data.CapInfo2,
                       section_name);
         get<0>(current_section->second) = true;
       } else {
@@ -746,11 +757,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // RADIUS_SET
-  {
+  if (success) {
     const string section_name{"RADIUS_SET"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), 1, toppar_data.RadiusSet,
+      success = parse_section(get<1>(current_section->second), 1, toppar_data.RadiusSet,
                     section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -758,11 +769,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // RADII
-  {
+  if (success) {
     const string section_name{"RADII"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Natom,
+      success = parse_section(get<1>(current_section->second), toppar_data.Natom,
                     toppar_data.Radii, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -770,11 +781,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // SCREEN
-  {
+  if (success) {
     const string section_name{"SCREEN"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
-      parse_section(get<1>(current_section->second), toppar_data.Natom,
+      success = parse_section(get<1>(current_section->second), toppar_data.Natom,
                     toppar_data.Screen, section_name);
       get<0>(current_section->second) = true;
     } else {
@@ -782,7 +793,7 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
   }
   // parse IPOL to determine the polarizability
-  {
+  if (success) {
     const string section_name{"IPOL"};
     const auto &current_section = toppar_map.find(section_name);
     if (current_section != toppar_map.end()) {
@@ -795,11 +806,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
   }
   if (toppar_data.Ipol > 0) {
     // POLARIZABILITY
-    {
+    if (success) {
       const string section_name{"POLARIZABILITY"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second), toppar_data.Natom,
+        success = parse_section(get<1>(current_section->second), toppar_data.Natom,
                       toppar_data.Polarizability, section_name);
         get<0>(current_section->second) = true;
       } else {
@@ -812,7 +823,7 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     // CHARMM force field in PSF format, and the user should use PSF instead of
     // AMBER format.
     // CHARMM_UREY_BRADLEY_COUNT
-    {
+    if (success) {
       const string section_name{"CHARMM_UREY_BRADLEY_COUNT"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
@@ -828,17 +839,18 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
         } else {
           std::cerr << "Expect " << 2 << " but " << get<1>(current_section->second).size() << " "
                     << section_name << " are defined\n";
+          success = false;
         }
       } else {
         cerr << "Missing " << section_name << " section!\n";
       }
     }
     // CHARMM_UREY_BRADLEY
-    {
+    if (success) {
       const string section_name{"CHARMM_UREY_BRADLEY"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second), toppar_data.Nub,
+        success = parse_section(get<1>(current_section->second), toppar_data.Nub,
                       {ref(toppar_data.UreyBradleyAt1),
                        ref(toppar_data.UreyBradleyAt2),
                        ref(toppar_data.UreyBradleyNum)},
@@ -849,11 +861,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       }
     }
     // CHARMM_UREY_BRADLEY_FORCE_CONSTANT
-    {
+    if (success) {
       const string section_name{"CHARMM_UREY_BRADLEY_FORCE_CONSTANT"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second), toppar_data.Nubtypes,
+        success = parse_section(get<1>(current_section->second), toppar_data.Nubtypes,
                       toppar_data.UreyBradleyForceConstants, section_name);
         get<0>(current_section->second) = true;
       } else {
@@ -861,11 +873,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       }
     }
     // CHARMM_UREY_BRADLEY_EQUIL_VALUE
-    {
+    if (success) {
       const string section_name{"CHARMM_UREY_BRADLEY_EQUIL_VALUE"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second), toppar_data.Nubtypes,
+        success = parse_section(get<1>(current_section->second), toppar_data.Nubtypes,
                       toppar_data.UreyBradleyEquilValues, section_name);
         get<0>(current_section->second) = true;
       } else {
@@ -873,7 +885,7 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       }
     }
     // CHARMM_NUM_IMPROPERS
-    {
+    if (success) {
       const string section_name{"CHARMM_NUM_IMPROPERS"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
@@ -888,17 +900,18 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
         } else {
           std::cerr << "Expect " << 1 << " but " << get<1>(current_section->second).size() << " "
                     << section_name << " are defined\n";
+          success = false;
         }
       } else {
         cerr << "Missing " << section_name << " section!\n";
       }
     }
     // CHARMM_IMPROPERS
-    {
+    if (success) {
       const string section_name{"CHARMM_IMPROPERS"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(
+        success = parse_section(
             get<1>(current_section->second), toppar_data.Nimphi,
             {ref(toppar_data.ImproperAt1), ref(toppar_data.ImproperAt2),
              ref(toppar_data.ImproperAt3), ref(toppar_data.ImproperAt4),
@@ -911,7 +924,7 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
     }
     // CHARMM_NUM_IMPR_TYPES
     // Not "CHARMM_NUM_IMPROPER_TYPES" in the documentation!
-    {
+    if (success) {
       const string section_name{"CHARMM_NUM_IMPR_TYPES"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
@@ -924,11 +937,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       }
     }
     // CHARMM_IMPROPER_FORCE_CONSTANT
-    {
+    if (success) {
       const string section_name{"CHARMM_IMPROPER_FORCE_CONSTANT"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second), toppar_data.NimprTypes,
+        success = parse_section(get<1>(current_section->second), toppar_data.NimprTypes,
                       toppar_data.ImproperForceConstants, section_name);
         get<0>(current_section->second) = true;
       } else {
@@ -936,11 +949,11 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       }
     }
     // CHARMM_IMPROPER_PHASE
-    {
+    if (success) {
       const string section_name{"CHARMM_IMPROPER_PHASE"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second), toppar_data.NimprTypes,
+        success = parse_section(get<1>(current_section->second), toppar_data.NimprTypes,
                       toppar_data.ImproperPhases, section_name);
         get<0>(current_section->second) = true;
       } else {
@@ -948,14 +961,14 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       }
     }
     // LENNARD_JONES_14_ACOEF
-    {
+    if (success) {
       const int Nttyp = toppar_data.Ntypes * (toppar_data.Ntypes + 1) / 2;
       const string section_name{"LENNARD_JONES_14_ACOEF"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
         // this is not assigned before
         toppar_data.LJ14ACoefficients.reserve(Nttyp);
-        parse_section(get<1>(current_section->second), Nttyp,
+        success = parse_section(get<1>(current_section->second), Nttyp,
                       toppar_data.LJ14ACoefficients, section_name);
         get<0>(current_section->second) = true;
       } else {
@@ -963,14 +976,14 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       }
     }
     // LENNARD_JONES_14_BCOEF
-    {
+    if (success) {
       const int Nttyp = toppar_data.Ntypes * (toppar_data.Ntypes + 1) / 2;
       const string section_name{"LENNARD_JONES_14_BCOEF"};
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
         // this is not assigned before
         toppar_data.LJ14BCoefficients.reserve(Nttyp);
-        parse_section(get<1>(current_section->second), Nttyp,
+        success = parse_section(get<1>(current_section->second), Nttyp,
                       toppar_data.LJ14BCoefficients, section_name);
         get<0>(current_section->second) = true;
       } else {
@@ -982,7 +995,7 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
   // ff19SB also have CMAP terms, so CMAP is not CHARMM-specific.
   // However, in CHARMM FF they are prefixed with CHARMM_
   // CMAP_COUNT or CHARMM_CMAP_COUNT
-  {
+  if (success) {
     const string section_name = toppar_data.IsCharmmFF
                                     ? string("CHARMM_CMAP_COUNT")
                                     : string("CMAP_COUNT");
@@ -1000,6 +1013,7 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       } else {
         std::cerr << "Expect " << 2 << " but " << get<1>(current_section->second).size() << " "
                   << section_name << " are defined\n";
+        success = false;
       }
     } else {
       toppar_data.HasCMAP = false;
@@ -1007,13 +1021,13 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
   }
   if (toppar_data.HasCMAP) {
     // CMAP_RESOLUTION or CHARMM_CMAP_RESOLUTION
-    {
+    if (success) {
       const string section_name = toppar_data.IsCharmmFF
                                       ? string("CHARMM_CMAP_RESOLUTION")
                                       : string("CMAP_RESOLUTION");
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second),
+        success = parse_section(get<1>(current_section->second),
                       toppar_data.CMAPTypeCount, toppar_data.CMAPResolution,
                       section_name);
         for (int i = 0; i < toppar_data.CMAPTypeCount; ++i) {
@@ -1025,7 +1039,7 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       }
     }
     // CHARMM_CMAP_PARAMETER_N or CMAP_PARAMETER_N
-    {
+    if (success) {
       for (int i = 0; i < toppar_data.CMAPTypeCount; ++i) {
         string name_index = std::to_string(i + 1);
         if (name_index.size() < 2)
@@ -1039,7 +1053,7 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
           const int resolution =
               toppar_data.CMAPResolution[i] * toppar_data.CMAPResolution[i];
           toppar_data.CMAPParameter[i].reserve(resolution);
-          parse_section(get<1>(current_section->second), resolution,
+          success = parse_section(get<1>(current_section->second), resolution,
                         toppar_data.CMAPParameter[i], section_name);
           get<0>(current_section->second) = true;
         } else {
@@ -1048,13 +1062,13 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
       }
     }
     // CMAP_INDEX
-    {
+    if (success) {
       const string section_name = toppar_data.IsCharmmFF
                                       ? string("CHARMM_CMAP_INDEX")
                                       : string("CMAP_INDEX");
       const auto &current_section = toppar_map.find(section_name);
       if (current_section != toppar_map.end()) {
-        parse_section(get<1>(current_section->second),
+        success = parse_section(get<1>(current_section->second),
                       toppar_data.CMAPTermCount * 6, toppar_data.CMAPIndex,
                       section_name);
         get<0>(current_section->second) = true;
@@ -1065,167 +1079,172 @@ int read_amber_parm_stage2(AmberTopparMap &toppar_map,
   }
   // NAMD requires the residue IDs for all atoms
   // so I need to fill AtomRes here before return
-  int res = 0;
-  for (int i = 0; i < toppar_data.Natom; ++i) {
-    if (i + 1 == toppar_data.Ipres[res+1])
-      ++res;
-    toppar_data.AtomRes.push_back(res);
-    std::cerr << i << " " << res << "\n";
+  if (success) {
+    int res = 0;
+    for (int i = 0; i < toppar_data.Natom; ++i) {
+      if (i + 1 == toppar_data.Ipres[res+1])
+        ++res;
+      toppar_data.AtomRes.push_back(res);
+    }
   }
-  return 0;
+  return success;
 }
 
-int parse_pointer(const vector<FortranData> &source, Ambertoppar &result) {
-  int failed_bit = 0;
-  result.Natom = source[0].Int;
-  result.Ntypes = source[1].Int;
-  result.Nbonh = source[2].Int;
-  result.Mbona = source[3].Int;
-  result.Ntheth = source[4].Int;
-  result.Mtheta = source[5].Int;
-  result.Nphih = source[6].Int;
-  result.Mphia = source[7].Int;
-  result.Nhparm = source[8].Int;
-  result.Nparm = source[9].Int;
-  result.Nnb = source[10].Int;
-  result.Nres = source[11].Int;
-  result.Nbona = source[12].Int;
-  result.Ntheta = source[13].Int;
-  result.Nphia = source[14].Int;
-  result.Numbnd = source[15].Int;
-  result.Numang = source[16].Int;
-  result.Nptra = source[17].Int;
-  result.Natyp = source[18].Int;
-  result.Nphb = source[19].Int;
-  result.Ifpert = source[20].Int;
-  result.Nbper = source[21].Int;
-  result.Ngper = source[22].Int;
-  result.Ndper = source[23].Int;
-  result.Mbper = source[24].Int;
-  result.Mgper = source[25].Int;
-  result.Mdper = source[26].Int;
-  result.Ifbox = source[27].Int;
-  result.Nmxrs = source[28].Int;
-  result.Ifcap = source[29].Int;
-  result.Numextra = source[30].Int;
-  // Ncopy may not be present
-  result.Ncopy = 31 < source.size() ? source[31].Int : 0;
-  // "allocate memory"
-  const int Ntype2d = result.Ntypes * result.Ntypes;
-  const int Nttyp = result.Ntypes * (result.Ntypes + 1) / 2;
-  result.AtomNames.reserve(result.Natom);
-  result.Charges.reserve(result.Natom);
-  result.Masses.reserve(result.Natom);
-  result.AtomNumbers.reserve(result.Natom);
-  result.Iac.reserve(result.Natom);
-  result.Iblo.reserve(result.Natom);
-  result.Cno.reserve(Ntype2d);
-  result.ResNames.reserve(result.Nres);
-  result.Ipres.reserve(result.Nres);
-  result.Rk.reserve(result.Numbnd);
-  result.Req.reserve(result.Numbnd);
-  result.Tk.reserve(result.Numang);
-  result.Teq.reserve(result.Numang);
-  result.Pk.reserve(result.Nptra);
-  result.Pn.reserve(result.Nptra);
-  result.Phase.reserve(result.Nptra);
-  result.SceeScaleFactor.reserve(result.Nptra);
-  result.ScnbScaleFactor.reserve(result.Nptra);
-  result.Solty.reserve(result.Natyp);
-  result.Cn1.reserve(Nttyp);
-  result.Cn2.reserve(Nttyp);
-  result.BondHAt1.reserve(result.Nbonh);
-  result.BondHAt2.reserve(result.Nbonh);
-  result.BondHNum.reserve(result.Nbonh);
-  result.BondAt1.reserve(result.Nbona);
-  result.BondAt2.reserve(result.Nbona);
-  result.BondNum.reserve(result.Nbona);
-  result.AngleHAt1.reserve(result.Ntheth);
-  result.AngleHAt2.reserve(result.Ntheth);
-  result.AngleHAt3.reserve(result.Ntheth);
-  result.AngleHNum.reserve(result.Ntheth);
-  result.AngleAt1.reserve(result.Ntheta);
-  result.AngleAt2.reserve(result.Ntheta);
-  result.AngleAt3.reserve(result.Ntheta);
-  result.AngleNum.reserve(result.Ntheta);
-  result.DihHAt1.reserve(result.Nphih);
-  result.DihHAt2.reserve(result.Nphih);
-  result.DihHAt3.reserve(result.Nphih);
-  result.DihHAt4.reserve(result.Nphih);
-  result.DihHNum.reserve(result.Nphih);
-  result.DihAt1.reserve(result.Nphia);
-  result.DihAt2.reserve(result.Nphia);
-  result.DihAt3.reserve(result.Nphia);
-  result.DihAt4.reserve(result.Nphia);
-  result.DihNum.reserve(result.Nphia);
-  result.ExclAt.reserve(result.Nnb);
-  result.HB12.reserve(result.Nphb);
-  result.HB10.reserve(result.Nphb);
-  result.AtomSym.reserve(result.Natom);
-  result.AtomTree.reserve(result.Natom);
-  result.TreeJoin.reserve(result.Natom);
-  result.AtomRes.reserve(result.Natom);
-  result.RadiusSet.reserve(1);
-  result.Radii.reserve(result.Natom);
-  result.Screen.reserve(result.Natom);
-  return failed_bit;
+bool parse_pointer(const vector<FortranData> &source, Ambertoppar &result) {
+  bool success = true;
+  if (source.size() > 30) {
+    result.Natom = source[0].Int;
+    result.Ntypes = source[1].Int;
+    result.Nbonh = source[2].Int;
+    result.Mbona = source[3].Int;
+    result.Ntheth = source[4].Int;
+    result.Mtheta = source[5].Int;
+    result.Nphih = source[6].Int;
+    result.Mphia = source[7].Int;
+    result.Nhparm = source[8].Int;
+    result.Nparm = source[9].Int;
+    result.Nnb = source[10].Int;
+    result.Nres = source[11].Int;
+    result.Nbona = source[12].Int;
+    result.Ntheta = source[13].Int;
+    result.Nphia = source[14].Int;
+    result.Numbnd = source[15].Int;
+    result.Numang = source[16].Int;
+    result.Nptra = source[17].Int;
+    result.Natyp = source[18].Int;
+    result.Nphb = source[19].Int;
+    result.Ifpert = source[20].Int;
+    result.Nbper = source[21].Int;
+    result.Ngper = source[22].Int;
+    result.Ndper = source[23].Int;
+    result.Mbper = source[24].Int;
+    result.Mgper = source[25].Int;
+    result.Mdper = source[26].Int;
+    result.Ifbox = source[27].Int;
+    result.Nmxrs = source[28].Int;
+    result.Ifcap = source[29].Int;
+    result.Numextra = source[30].Int;
+    // Ncopy may not be present
+    result.Ncopy = 31 < source.size() ? source[31].Int : 0;
+    // "allocate memory"
+    const int Ntype2d = result.Ntypes * result.Ntypes;
+    const int Nttyp = result.Ntypes * (result.Ntypes + 1) / 2;
+    result.AtomNames.reserve(result.Natom);
+    result.Charges.reserve(result.Natom);
+    result.Masses.reserve(result.Natom);
+    result.AtomNumbers.reserve(result.Natom);
+    result.Iac.reserve(result.Natom);
+    result.Iblo.reserve(result.Natom);
+    result.Cno.reserve(Ntype2d);
+    result.ResNames.reserve(result.Nres);
+    result.Ipres.reserve(result.Nres);
+    result.Rk.reserve(result.Numbnd);
+    result.Req.reserve(result.Numbnd);
+    result.Tk.reserve(result.Numang);
+    result.Teq.reserve(result.Numang);
+    result.Pk.reserve(result.Nptra);
+    result.Pn.reserve(result.Nptra);
+    result.Phase.reserve(result.Nptra);
+    result.SceeScaleFactor.reserve(result.Nptra);
+    result.ScnbScaleFactor.reserve(result.Nptra);
+    result.Solty.reserve(result.Natyp);
+    result.Cn1.reserve(Nttyp);
+    result.Cn2.reserve(Nttyp);
+    result.BondHAt1.reserve(result.Nbonh);
+    result.BondHAt2.reserve(result.Nbonh);
+    result.BondHNum.reserve(result.Nbonh);
+    result.BondAt1.reserve(result.Nbona);
+    result.BondAt2.reserve(result.Nbona);
+    result.BondNum.reserve(result.Nbona);
+    result.AngleHAt1.reserve(result.Ntheth);
+    result.AngleHAt2.reserve(result.Ntheth);
+    result.AngleHAt3.reserve(result.Ntheth);
+    result.AngleHNum.reserve(result.Ntheth);
+    result.AngleAt1.reserve(result.Ntheta);
+    result.AngleAt2.reserve(result.Ntheta);
+    result.AngleAt3.reserve(result.Ntheta);
+    result.AngleNum.reserve(result.Ntheta);
+    result.DihHAt1.reserve(result.Nphih);
+    result.DihHAt2.reserve(result.Nphih);
+    result.DihHAt3.reserve(result.Nphih);
+    result.DihHAt4.reserve(result.Nphih);
+    result.DihHNum.reserve(result.Nphih);
+    result.DihAt1.reserve(result.Nphia);
+    result.DihAt2.reserve(result.Nphia);
+    result.DihAt3.reserve(result.Nphia);
+    result.DihAt4.reserve(result.Nphia);
+    result.DihNum.reserve(result.Nphia);
+    result.ExclAt.reserve(result.Nnb);
+    result.HB12.reserve(result.Nphb);
+    result.HB10.reserve(result.Nphb);
+    result.AtomSym.reserve(result.Natom);
+    result.AtomTree.reserve(result.Natom);
+    result.TreeJoin.reserve(result.Natom);
+    result.AtomRes.reserve(result.Natom);
+    result.RadiusSet.reserve(1);
+    result.Radii.reserve(result.Natom);
+    result.Screen.reserve(result.Natom);
+  } else {
+    success = false;
+  }
+  return success;
 }
 
-int parse_section(const vector<FortranData> &source, const int &count,
-                  vector<string> &destination, const string &section_name) {
-  int failed_bit = 0;
+bool parse_section(const vector<FortranData> &source, const int &count,
+                   vector<string> &destination, const string &section_name) {
+  bool success = true;
   if (int(source.size()) != count) {
     std::cerr << "Expect " << count << " but " << source.size() << " "
               << section_name << " are defined\n";
-    failed_bit = -1;
+    success = false;
   } else {
     for (int i = 0; i < count; ++i) {
       destination.push_back(source[i].String);
     }
   }
-  return failed_bit;
+  return success;
 }
 
-int parse_section(const vector<FortranData> &source, const int &count,
-                  vector<int> &destination, const string &section_name) {
-  int failed_bit = 0;
+bool parse_section(const vector<FortranData> &source, const int &count,
+                   vector<int> &destination, const string &section_name) {
+  bool success = true;
   if (int(source.size()) != count) {
     std::cerr << "Expect " << count << " but " << source.size() << " "
               << section_name << " are defined\n";
-    failed_bit = -1;
+    success = false;
   } else {
     for (int i = 0; i < count; ++i) {
       destination.push_back(source[i].Int);
     }
   }
-  return failed_bit;
+  return success;
 }
 
-int parse_section(const vector<FortranData> &source, const int &count,
-                  vector<_REAL> &destination, const string &section_name) {
-  int failed_bit = 0;
+bool parse_section(const vector<FortranData> &source, const int &count,
+                   vector<_REAL> &destination, const string &section_name) {
+  bool success = true;
   if (int(source.size()) != count) {
     std::cerr << "Expect " << count << " but " << source.size() << " "
               << section_name << " are defined\n";
-    failed_bit = -1;
+    success = false;
   } else {
     for (int i = 0; i < count; ++i) {
       destination.push_back(source[i].Real);
     }
   }
-  return failed_bit;
+  return success;
 }
 
-int parse_section(
-    const vector<FortranData> &source, const int &count,
-    std::initializer_list<std::reference_wrapper<vector<string>>> destination,
-    const string &section_name) {
-  int failed_bit = 0;
+bool parse_section(
+     const vector<FortranData> &source, const int &count,
+     std::initializer_list<std::reference_wrapper<vector<string>>> destination,
+     const string &section_name) {
+  bool success = true;
   const int total_size = destination.size() * count;
   if (int(source.size()) != total_size) {
     std::cerr << "Expect " << total_size << " but " << source.size() << " "
               << section_name << " are defined\n";
-    failed_bit = -1;
+    success = false;
   } else {
     const int stride = destination.size();
     for (int i = 0; i < count; ++i) {
@@ -1236,19 +1255,19 @@ int parse_section(
       }
     }
   }
-  return failed_bit;
+  return success;
 }
 
-int parse_section(
-    const vector<FortranData> &source, const int &count,
-    std::initializer_list<std::reference_wrapper<vector<int>>> destination,
-    const string &section_name) {
-  int failed_bit = 0;
+bool parse_section(
+     const vector<FortranData> &source, const int &count,
+     std::initializer_list<std::reference_wrapper<vector<int>>> destination,
+     const string &section_name) {
+  bool success = true;
   const int total_size = destination.size() * count;
   if (int(source.size()) != total_size) {
     std::cerr << "Expect " << total_size << " but " << source.size() << " "
               << section_name << " are defined\n";
-    failed_bit = -1;
+    success = false;
   } else {
     const int stride = destination.size();
     for (int i = 0; i < count; ++i) {
@@ -1259,19 +1278,19 @@ int parse_section(
       }
     }
   }
-  return failed_bit;
+  return success;
 }
 
-int parse_section(
-    const vector<FortranData> &source, const int &count,
-    std::initializer_list<std::reference_wrapper<vector<_REAL>>> destination,
-    const string &section_name) {
-  int failed_bit = 0;
+bool parse_section(
+     const vector<FortranData> &source, const int &count,
+     std::initializer_list<std::reference_wrapper<vector<_REAL>>> destination,
+     const string &section_name) {
+  bool success = true;
   const int total_size = destination.size() * count;
   if (int(source.size()) != total_size) {
     std::cerr << "Expect " << total_size << " but " << source.size() << " "
               << section_name << " are defined\n";
-    failed_bit = -1;
+    success = false;
   } else {
     const int stride = destination.size();
     for (int i = 0; i < count; ++i) {
@@ -1282,15 +1301,20 @@ int parse_section(
       }
     }
   }
-  return failed_bit;
+  return success;
 }
 
 Ambertoppar readparm(const char *filename) {
   AmberParm7Reader::AmberTopparMap Amber_toppar_map;
-  AmberParm7Reader::read_amber_parm_stage1(filename, Amber_toppar_map);
   AmberParm7Reader::Ambertoppar data;
-  if (AmberParm7Reader::read_amber_parm_stage2(Amber_toppar_map, data) == 0) {
-    data.HasData = true;
+  if (AmberParm7Reader::read_amber_parm_stage1(filename, Amber_toppar_map)) {
+    if (AmberParm7Reader::read_amber_parm_stage2(Amber_toppar_map, data) == true) {
+      data.HasData = true;
+    } else {
+      std::cerr << "Failed to parse AMBER parm7 file: " << filename << " at read_amber_parm_stage2\n";
+    }
+  } else {
+    std::cerr << "Failed to read AMBER parm7 file: " << filename << " at read_amber_parm_stage1\n";
   }
   return data;
 }

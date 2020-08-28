@@ -48,6 +48,7 @@ using std::vector;
 using std::string;
 using std::unordered_map;
 using std::tuple;
+using std::make_tuple;
 
 /* Frankly speaking, I don't fully understand the whole specification of fortran 
  * format specifiers. I try to implement a few of them, which should be enough for 
@@ -271,7 +272,7 @@ void split_string_by_specifiers(const string& source,
  *  @param  toppar_map a map contains the FLAG title and the data.
  *  @return read status. It will return 0 if the reading is successful.
  */
-int read_amber_parm_stage1(const char* filename, AmberTopparMap& toppar_map);
+bool read_amber_parm_stage1(const char* filename, AmberTopparMap& toppar_map);
 
 /**
  *  @brief  Read an AmberTopparMap into an Ambertoppar struct for NAMD.
@@ -279,12 +280,12 @@ int read_amber_parm_stage1(const char* filename, AmberTopparMap& toppar_map);
  *  @param  toppar_data an Ambertoppar struct for NAMD.
  *  @return read status. It will return 0 if the reading is successful.
  */
-int read_amber_parm_stage2(AmberTopparMap& toppar_map, Ambertoppar& toppar_data);
+bool read_amber_parm_stage2(AmberTopparMap& toppar_map, Ambertoppar& toppar_data);
 
 // helper function for read the POINTER section and allocate the memory 
 // according to the sizes in it.
-int parse_pointer(const vector<FortranData>& source,
-                  Ambertoppar& result);
+bool parse_pointer(const vector<FortranData>& source,
+                   Ambertoppar& result);
 
 /**
  *  @brief Copy data from source to destination.
@@ -294,18 +295,18 @@ int parse_pointer(const vector<FortranData>& source,
  *  @param section_name name of the section (used for sanity check only).
  *  @return read status. It will return 0 if the reading is successful.
  */
-int parse_section(const vector<FortranData>& source,
-                  const int& count,
-                  vector<string>& destination,
-                  const string& section_name);
-int parse_section(const vector<FortranData>& source,
-                  const int& count,
-                  vector<int>& destination,
-                  const string& section_name);
-int parse_section(const vector<FortranData>& source,
-                  const int& count,
-                  vector<_REAL>& destination,
-                  const string& section_name);
+bool parse_section(const vector<FortranData>& source,
+                   const int& count,
+                   vector<string>& destination,
+                   const string& section_name);
+bool parse_section(const vector<FortranData>& source,
+                   const int& count,
+                   vector<int>& destination,
+                   const string& section_name);
+bool parse_section(const vector<FortranData>& source,
+                   const int& count,
+                   vector<_REAL>& destination,
+                   const string& section_name);
 
 /**
  *  @brief Copy data from source to multiple destination arrays.
@@ -317,18 +318,18 @@ int parse_section(const vector<FortranData>& source,
  *  @param destination multiple destination arrays in Ambertoppar.
  *  @param section_name name of the section (used for sanity check only).
  */
-int parse_section(const vector<FortranData>& source,
-                  const int& count,
-                  std::initializer_list<std::reference_wrapper<vector<string>>> destination,
-                  const string& section_name);
-int parse_section(const vector<FortranData>& source,
-                  const int& count,
-                  std::initializer_list<std::reference_wrapper<vector<int>>> destination,
-                  const string& section_name);
-int parse_section(const vector<FortranData>& source,
-                  const int& count,
-                  std::initializer_list<std::reference_wrapper<vector<_REAL>>> destination,
-                  const string& section_name);
+bool parse_section(const vector<FortranData>& source,
+                   const int& count,
+                   std::initializer_list<std::reference_wrapper<vector<string>>> destination,
+                   const string& section_name);
+bool parse_section(const vector<FortranData>& source,
+                   const int& count,
+                   std::initializer_list<std::reference_wrapper<vector<int>>> destination,
+                   const string& section_name);
+bool parse_section(const vector<FortranData>& source,
+                   const int& count,
+                   std::initializer_list<std::reference_wrapper<vector<_REAL>>> destination,
+                   const string& section_name);
 
 // reader function for NAMD
 Ambertoppar readparm(const char* filename);
