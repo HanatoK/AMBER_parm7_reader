@@ -1087,6 +1087,13 @@ bool read_amber_parm_stage2(AmberTopparMap &toppar_map,
       toppar_data.AtomRes.push_back(res);
     }
   }
+  // now we check and report any unknown sections
+  for (auto it = toppar_map.begin(); it != toppar_map.end(); ++it) {
+    if (get<0>(it->second) == false) {
+      cerr << "Unknown section " << (it->first).c_str()
+           << " found in the AMBER format paramter file!\n";
+    }
+  }
   return success;
 }
 
@@ -1216,6 +1223,7 @@ bool parse_section(const vector<FortranData> &source, const int &count,
     for (int i = 0; i < count; ++i) {
       destination.push_back(source[i].Int);
     }
+    std::cerr << "Complete reading " << section_name.c_str() << " with " << count << " fields.\n";
   }
   return success;
 }
@@ -1231,6 +1239,7 @@ bool parse_section(const vector<FortranData> &source, const int &count,
     for (int i = 0; i < count; ++i) {
       destination.push_back(source[i].Real);
     }
+    std::cerr << "Complete reading " << section_name.c_str() << " with " << count << " fields.\n";
   }
   return success;
 }
@@ -1254,6 +1263,7 @@ bool parse_section(
         ++j;
       }
     }
+    std::cerr << "Complete reading " << section_name.c_str() << " with " << total_size << " fields.\n";
   }
   return success;
 }
@@ -1277,6 +1287,7 @@ bool parse_section(
         ++j;
       }
     }
+    std::cerr << "Complete reading " << section_name.c_str() << " with " << total_size << " fields.\n";
   }
   return success;
 }
@@ -1300,6 +1311,7 @@ bool parse_section(
         ++j;
       }
     }
+    std::cerr << "Complete reading " << section_name.c_str() << " with " << total_size << " fields.\n";
   }
   return success;
 }
