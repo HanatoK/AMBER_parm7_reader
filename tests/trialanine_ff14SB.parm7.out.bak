@@ -1,0 +1,51 @@
+=================================================================================
+Number of atoms: 42
+Number of unique bond types: 11
+Number of atoms in the largest residue: 10
+Number of bonds involving hydrogen: 22
+Number of bonds not involving hydrogen: 19
+=================================================================================
+=================================================================================
+Atom information: 
+  Index =        0 ; name = H1   ; charge =       2.0464 ; mass =        1.008 ; lj_type_index =    1 ; resid =        0 ; resname = ACE 
+  Index =        1 ; name = CH3  ; charge =       -6.673 ; mass =        12.01 ; lj_type_index =    2 ; resid =        0 ; resname = ACE 
+  Index =        2 ; name = H2   ; charge =       2.0464 ; mass =        1.008 ; lj_type_index =    1 ; resid =        0 ; resname = ACE 
+  Index =        3 ; name = H3   ; charge =       2.0464 ; mass =        1.008 ; lj_type_index =    1 ; resid =        0 ; resname = ACE 
+  Index =        4 ; name = C    ; charge =       10.882 ; mass =        12.01 ; lj_type_index =    3 ; resid =        0 ; resname = ACE 
+  Index =        5 ; name = O    ; charge =      -10.348 ; mass =           16 ; lj_type_index =    4 ; resid =        0 ; resname = ACE 
+  Index =        6 ; name = N    ; charge =       -7.575 ; mass =        14.01 ; lj_type_index =    5 ; resid =        1 ; resname = ALA 
+  Index =        7 ; name = H    ; charge =       4.9546 ; mass =        1.008 ; lj_type_index =    6 ; resid =        1 ; resname = ALA 
+  Index =        8 ; name = CA   ; charge =      0.61409 ; mass =        12.01 ; lj_type_index =    2 ; resid =        1 ; resname = ALA 
+  Index =        9 ; name = HA   ; charge =       1.4997 ; mass =        1.008 ; lj_type_index =    7 ; resid =        1 ; resname = ALA 
+  Index =       10 ; name = CB   ; charge =      -3.3256 ; mass =        12.01 ; lj_type_index =    2 ; resid =        1 ; resname = ALA 
+  Index =       11 ; name = HB1  ; charge =       1.0988 ; mass =        1.008 ; lj_type_index =    1 ; resid =        1 ; resname = ALA 
+  Index =       12 ; name = HB2  ; charge =       1.0988 ; mass =        1.008 ; lj_type_index =    1 ; resid =        1 ; resname = ALA 
+  Index =       13 ; name = HB3  ; charge =       1.0988 ; mass =        1.008 ; lj_type_index =    1 ; resid =        1 ; resname = ALA 
+  Index =       14 ; name = C    ; charge =       10.884 ; mass =        12.01 ; lj_type_index =    3 ; resid =        1 ; resname = ALA 
+  Index =       15 ; name = O    ; charge =      -10.348 ; mass =           16 ; lj_type_index =    4 ; resid =        1 ; resname = ALA 
+  Index =       16 ; name = N    ; charge =       -7.575 ; mass =        14.01 ; lj_type_index =    5 ; resid =        2 ; resname = ALA 
+  Index =       17 ; name = H    ; charge =       4.9546 ; mass =        1.008 ; lj_type_index =    6 ; resid =        2 ; resname = ALA 
+  Index =       18 ; name = CA   ; charge =      0.61409 ; mass =        12.01 ; lj_type_index =    2 ; resid =        2 ; resname = ALA 
+  Index =       19 ; name = HA   ; charge =       1.4997 ; mass =        1.008 ; lj_type_index =    7 ; resid =        2 ; resname = ALA 
+  Index =       20 ; name = CB   ; charge =      -3.3256 ; mass =        12.01 ; lj_type_index =    2 ; resid =        2 ; resname = ALA 
+  Index =       21 ; name = HB1  ; charge =       1.0988 ; mass =        1.008 ; lj_type_index =    1 ; resid =        2 ; resname = ALA 
+  Index =       22 ; name = HB2  ; charge =       1.0988 ; mass =        1.008 ; lj_type_index =    1 ; resid =        2 ; resname = ALA 
+  Index =       23 ; name = HB3  ; charge =       1.0988 ; mass =        1.008 ; lj_type_index =    1 ; resid =        2 ; resname = ALA 
+  Index =       24 ; name = C    ; charge =       10.884 ; mass =        12.01 ; lj_type_index =    3 ; resid =        2 ; resname = ALA 
+  Index =       25 ; name = O    ; charge =      -10.348 ; mass =           16 ; lj_type_index =    4 ; resid =        2 ; resname = ALA 
+  Index =       26 ; name = N    ; charge =       -7.575 ; mass =        14.01 ; lj_type_index =    5 ; resid =        3 ; resname = ALA 
+  Index =       27 ; name = H    ; charge =       4.9546 ; mass =        1.008 ; lj_type_index =    6 ; resid =        3 ; resname = ALA 
+  Index =       28 ; name = CA   ; charge =      0.61409 ; mass =        12.01 ; lj_type_index =    2 ; resid =        3 ; resname = ALA 
+  Index =       29 ; name = HA   ; charge =       1.4997 ; mass =        1.008 ; lj_type_index =    7 ; resid =        3 ; resname = ALA 
+  Index =       30 ; name = CB   ; charge =      -3.3256 ; mass =        12.01 ; lj_type_index =    2 ; resid =        3 ; resname = ALA 
+  Index =       31 ; name = HB1  ; charge =       1.0988 ; mass =        1.008 ; lj_type_index =    1 ; resid =        3 ; resname = ALA 
+  Index =       32 ; name = HB2  ; charge =       1.0988 ; mass =        1.008 ; lj_type_index =    1 ; resid =        3 ; resname = ALA 
+  Index =       33 ; name = HB3  ; charge =       1.0988 ; mass =        1.008 ; lj_type_index =    1 ; resid =        3 ; resname = ALA 
+  Index =       34 ; name = C    ; charge =       10.884 ; mass =        12.01 ; lj_type_index =    3 ; resid =        3 ; resname = ALA 
+  Index =       35 ; name = O    ; charge =      -10.348 ; mass =           16 ; lj_type_index =    4 ; resid =        3 ; resname = ALA 
+  Index =       36 ; name = N    ; charge =       -7.575 ; mass =        14.01 ; lj_type_index =    5 ; resid =        4 ; resname = NME 
+  Index =       37 ; name = H    ; charge =       4.9546 ; mass =        1.008 ; lj_type_index =    6 ; resid =        4 ; resname = NME 
+  Index =       38 ; name = CH3  ; charge =      -2.7151 ; mass =        12.01 ; lj_type_index =    2 ; resid =        4 ; resname = NME 
+  Index =       39 ; name = HH31 ; charge =       1.7785 ; mass =        1.008 ; lj_type_index =    7 ; resid =        4 ; resname = NME 
+  Index =       40 ; name = HH32 ; charge =       1.7785 ; mass =        1.008 ; lj_type_index =    7 ; resid =        4 ; resname = NME 
+  Index =       41 ; name = HH33 ; charge =       1.7785 ; mass =        1.008 ; lj_type_index =    7 ; resid =        4 ; resname = NME 

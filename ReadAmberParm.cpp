@@ -57,6 +57,94 @@ void parse_fortran_format(const std::string &str,
   }
 }
 
+void split_string(const std::string& data,
+                  const std::string& delim,
+                  std::vector<std::string>& dest) {
+  size_t index = 0, new_index = 0;
+  std::string tmpstr;
+  while (index != data.length()) {
+    new_index = data.find(delim, index);
+    if (new_index != std::string::npos) tmpstr = data.substr(index, new_index - index);
+    else tmpstr = data.substr(index, data.length());
+    if (!tmpstr.empty()) {
+        dest.push_back(tmpstr);
+    }
+    if (new_index == std::string::npos) break;
+    index = new_index + 1;
+  }
+}
+
+void parse_fortran_format_noregex(const std::string &str,
+                                  FortranFormatSpecifier &specifier) {
+  size_t left_quotation_mark = str.find("'");
+  if (left_quotation_mark == std::string::npos) {
+    std::string num_fields, type, width, dot, precision;
+    for (size_t i = 0; i < str.size(); ++i) {
+      // check if this is a digit at first.
+      if (std::isdigit(str[i])) {
+        // then check if the digit is before or after the type.
+        if (type.size() > 0) {
+          // if type is already read,
+          // then append this character to "width" or "precision".
+          if (dot.size() > 0) {
+            // the digit after "." denotes the precision.
+            precision += str[i];
+          } else {
+            // the digit is after the type field but before ".".
+            width += str[i];
+          }
+        } else {
+          // the digit before the type represents the number of fields.
+          num_fields += str[i];
+        }
+      } else if (std::isalpha(str[i])) {
+        // if it is [A-Za-z] then it denotes the type.
+        type += str[i];
+      } else if (str[i] == '.') {
+        dot += str[i];
+      } else {
+        // skip other characters
+        continue;
+      }
+    }
+    // populate the FortranFormatSpecifier struct
+    if (num_fields.size() > 0) {
+      specifier.NumOfFields = std::stoul(num_fields.c_str());
+    } else {
+      // ("i10", "E6.2")
+      specifier.NumOfFields = 1;
+    }
+    // must have "type"
+    specifier.Type = type.front();
+    // must have "width"
+    specifier.Width = std::stoul(width.c_str());
+    if (precision.size() > 0) {
+      specifier.Precision = std::stoul(precision.c_str());
+    } else {
+      // integers have no precision fields
+      specifier.Precision = -1;
+    }
+  } else {
+    size_t right_quotation_mark = str.find("'", left_quotation_mark + 1);
+    specifier.IsPadding = true;
+    specifier.Padding =
+        str.substr(left_quotation_mark + 1,
+                   right_quotation_mark - (left_quotation_mark + 1));
+    specifier.NumOfFields = 1;
+  }
+}
+
+void parse_fortran_format_noregex(const std::string &str,
+                                  vector<FortranFormatSpecifier> &specifiers) {
+  // split the string by comma
+  vector<string> sub_format_strings;
+  split_string(str, ",", sub_format_strings);
+  specifiers.resize(sub_format_strings.size());
+  for (size_t i = 0; i < sub_format_strings.size(); ++i) {
+    parse_fortran_format_noregex(sub_format_strings[i], specifiers[i]);
+  }
+}
+
 void parse_fortran_format(const std::string &str,
                           vector<FortranFormatSpecifier> &specifiers) {
   using std::back_inserter;
@@ -186,7 +274,7 @@ bool read_amber_parm_stage1(const char *filename, AmberTopparMap &toppar_map) {
         }
         const size_t format_start = line.find("(", strlen("%FORMAT"));
         const size_t format_end = line.find(")", format_start + 1);
-        parse_fortran_format(
+        parse_fortran_format_noregex(
             line.substr(format_start + 1, format_end - (format_start + 1)),
             specifiers);
         match_format = true;
