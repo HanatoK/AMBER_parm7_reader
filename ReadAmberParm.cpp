@@ -1170,7 +1170,7 @@ bool read_amber_parm_stage2(AmberTopparMap &toppar_map,
   if (success) {
     int res = 0;
     for (int i = 0; i < toppar_data.Natom; ++i) {
-      if (i + 1 == toppar_data.Ipres[res+1])
+      if ((res+1 < toppar_data.Nres) && (i + 1 == toppar_data.Ipres[res+1]))
         ++res;
       toppar_data.AtomRes.push_back(res);
     }
